@@ -28,22 +28,29 @@ const Reports: React.FC<ReportsProps> = ({ clients, visits }) => {
     count: oppsByType[key]
   }));
 
-  // 3. Monthly Interaction History (Mock logic assuming current year for demo)
+  // 3. Monthly Interaction History (Current Year)
   const visitsByMonth = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Jan-Dec
+  const currentYear = new Date().getFullYear();
+  
   visits.forEach(v => {
-    const month = new Date(v.date).getMonth();
-    visitsByMonth[month]++;
+    const date = new Date(v.date);
+    // Ensure we only count visits from the current year and valid dates
+    if (!isNaN(date.getTime()) && date.getFullYear() === currentYear) {
+      const month = date.getMonth();
+      visitsByMonth[month]++;
+    }
   });
+
   const monthlyData = visitsByMonth.map((count, idx) => ({
-    name: new Date(0, idx).toLocaleString('pt-PT', { month: 'short' }),
+    name: new Date(currentYear, idx).toLocaleString('pt-PT', { month: 'short' }),
     visitas: count
-  })).slice(new Date().getMonth() - 5, new Date().getMonth() + 1); // Last 6 months
+  })).slice(0, new Date().getMonth() + 1); // Show up to current month
 
   return (
     <div className="p-4 pb-24 space-y-6 animate-fade-in h-full overflow-y-auto">
       <header className="mb-4">
         <h1 className="text-2xl font-bold text-gray-900">Relatórios & Análises</h1>
-        <p className="text-gray-500 text-sm">Performance comercial e operacional</p>
+        <p className="text-gray-500 text-sm">Performance comercial e operacional ({currentYear})</p>
       </header>
 
       {/* Opportunities Card */}
@@ -65,14 +72,18 @@ const Reports: React.FC<ReportsProps> = ({ clients, visits }) => {
             </div>
         </div>
         <div className="h-48 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={oppsData}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" tick={{fontSize: 10}} />
-              <Tooltip />
-              <Bar dataKey="count" fill="#1a1a1a" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {oppsData.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={oppsData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="name" tick={{fontSize: 10}} interval={0} />
+                <Tooltip />
+                <Bar dataKey="count" fill="#1a1a1a" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-gray-400 text-xs">Sem oportunidades registradas ainda.</div>
+          )}
         </div>
       </div>
 
@@ -83,21 +94,25 @@ const Reports: React.FC<ReportsProps> = ({ clients, visits }) => {
           <h3 className="font-bold text-lg">Visitas por Área</h3>
         </div>
         <div className="h-56 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={visitsByArea} layout="vertical" margin={{left: 20}}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-              <XAxis type="number" hide />
-              <YAxis dataKey="name" type="category" width={80} tick={{fontSize: 11}} />
-              <Tooltip />
-              <Bar dataKey="visitas" fill="#aa0000" radius={[0, 4, 4, 0]} barSize={24} />
-            </BarChart>
-          </ResponsiveContainer>
+           {visits.some(v => v.status === VisitStatus.COMPLETED) ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={visitsByArea} layout="vertical" margin={{left: 20}}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" hide />
+                <YAxis dataKey="name" type="category" width={80} tick={{fontSize: 11}} />
+                <Tooltip />
+                <Bar dataKey="visitas" fill="#aa0000" radius={[0, 4, 4, 0]} barSize={24} />
+              </BarChart>
+            </ResponsiveContainer>
+           ) : (
+             <div className="h-full flex items-center justify-center text-gray-400 text-xs">Nenhuma visita realizada.</div>
+           )}
         </div>
       </div>
 
       {/* Interaction History */}
       <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-         <h3 className="font-bold text-lg mb-4 text-gray-800">Histórico de Interações</h3>
+         <h3 className="font-bold text-lg mb-4 text-gray-800">Histórico de Visitas ({currentYear})</h3>
          <div className="h-48 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={monthlyData}>
