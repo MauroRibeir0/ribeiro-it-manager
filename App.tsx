@@ -50,6 +50,9 @@ const App: React.FC = () => {
   // Notification Tracking Ref (avoid duplicate alerts)
   const alertedRef = useRef<Set<string>>(new Set());
 
+  // PWA Install Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
   // Notification Helper
   const addToast = (message: string, type: ToastType = 'info') => {
     const newToast: NotificationToast = {
@@ -58,6 +61,26 @@ const App: React.FC = () => {
       type
     };
     setToasts(prev => [...prev, newToast]);
+  };
+
+  // 0. PWA Install Logic
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+  }, []);
+
+  const handleInstallClick = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User accepted the install prompt');
+        }
+        setDeferredPrompt(null);
+      });
+    }
   };
 
   // 1. Auth & Session Management
@@ -81,20 +104,24 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Data Fetching from Supabase
+  // 2. Data Fetching from Supabase (Optimized with Promise.all)
   const fetchData = async (userId: string) => {
     setDataLoading(true);
     try {
-      // Fetch Clients
-      const { data: clientsData, error: clientsError } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('user_id', userId);
+      // Execute requests in parallel instead of sequentially
+      const [clientsRes, visitsRes, tasksRes] = await Promise.all([
+        supabase.from('clients').select('*').eq('user_id', userId),
+        supabase.from('visits').select('*').eq('user_id', userId),
+        supabase.from('tasks').select('*').eq('user_id', userId)
+      ]);
 
-      if (clientsError) throw clientsError;
+      // Check for errors
+      if (clientsRes.error) throw clientsRes.error;
+      if (visitsRes.error) throw visitsRes.error;
+      if (tasksRes.error) throw tasksRes.error;
 
-      // Map DB columns (snake_case) to TS types (camelCase)
-      const mappedClients: Client[] = (clientsData || []).map(c => ({
+      // Map Clients
+      const mappedClients: Client[] = (clientsRes.data || []).map(c => ({
         id: c.id,
         name: c.name,
         address: c.address,
@@ -112,15 +139,8 @@ const App: React.FC = () => {
       }));
       setClients(mappedClients);
 
-      // Fetch Visits
-      const { data: visitsData, error: visitsError } = await supabase
-        .from('visits')
-        .select('*')
-        .eq('user_id', userId);
-
-      if (visitsError) throw visitsError;
-
-      const mappedVisits: Visit[] = (visitsData || []).map(v => ({
+      // Map Visits
+      const mappedVisits: Visit[] = (visitsRes.data || []).map(v => ({
         id: v.id,
         clientId: v.client_id,
         date: v.date,
@@ -133,15 +153,8 @@ const App: React.FC = () => {
       }));
       setVisits(mappedVisits);
 
-      // Fetch Tasks
-      const { data: tasksData, error: tasksError } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('user_id', userId);
-
-      if (tasksError) throw tasksError;
-
-      const mappedTasks: Task[] = (tasksData || []).map(t => ({
+      // Map Tasks
+      const mappedTasks: Task[] = (tasksRes.data || []).map(t => ({
         id: t.id,
         title: t.title,
         dueDate: t.due_date,
@@ -164,8 +177,16 @@ const App: React.FC = () => {
 
     requestNotificationPermission();
 
-    const checkUpcomingVisits = () => {
+    const checkUpcomingEvents = () => {
       const now = new Date();
+
+      // Calculate Local Today String (YYYY-MM-DD) to match Task.dueDate format
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const todayStr = `${year}-${month}-${day}`;
+
+      // 1. Check Visits
       visits.forEach(visit => {
         if (visit.status !== VisitStatus.SCHEDULED) return;
         if (alertedRef.current.has(visit.id)) return;
@@ -183,11 +204,34 @@ const App: React.FC = () => {
           alertedRef.current.add(visit.id);
         }
       });
+
+      // 2. Check Tasks
+      tasks.forEach(task => {
+        if (task.completed) return;
+        if (alertedRef.current.has(task.id)) return;
+
+        // Alert if due date is Today
+        if (task.dueDate === todayStr) {
+          const title = `Tarefa Vence Hoje`;
+          const body = `${task.title} (${task.priority})`;
+          
+          sendNativeNotification(title, body);
+          
+          // Visual Toast - Yellow for warning/attention
+          addToast(`Tarefa para hoje: ${task.title}`, 'warning');
+          
+          // Mark as alerted so we don't spam every minute
+          alertedRef.current.add(task.id);
+        }
+      });
     };
 
-    const intervalId = setInterval(checkUpcomingVisits, 60000);
-    return () => clearInterval(intervalId);
-  }, [visits, clients, session]);
+    const checkInterval = setInterval(checkUpcomingEvents, 60000);
+    // Run immediately once
+    checkUpcomingEvents();
+
+    return () => clearInterval(checkInterval);
+  }, [visits, clients, tasks, session]);
 
   const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
 
@@ -457,7 +501,7 @@ const App: React.FC = () => {
 
   if (authLoading) {
       return (
-          <div className="h-screen w-screen flex items-center justify-center bg-gray-100">
+          <div className="h-[100dvh] w-screen flex items-center justify-center bg-gray-100">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-ribeiro-red"></div>
           </div>
       );
@@ -473,16 +517,24 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#f3f4f6] text-gray-800 font-sans">
+    <div className="h-[100dvh] w-screen flex flex-col bg-[#f3f4f6] text-gray-800 font-sans">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
 
       {/* Top Bar */}
-      <div className="bg-white p-4 shadow-sm flex justify-between items-center z-10">
+      <div className="bg-white p-4 shadow-sm flex justify-between items-center z-10 pt-safe-top">
         <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-ribeiro-red rounded flex items-center justify-center text-white font-bold text-xl">R</div>
             <h1 className="font-bold text-xl tracking-tight text-ribeiro-dark">Ribeiro, Lda.</h1>
         </div>
         <div className="flex gap-2 items-center">
+             {deferredPrompt && (
+                <button 
+                    onClick={handleInstallClick} 
+                    className="bg-ribeiro-red text-white text-xs px-2 py-1 rounded animate-pulse font-bold shadow-sm"
+                >
+                    Instalar App
+                </button>
+             )}
              {dataLoading && <RefreshCw className="animate-spin text-gray-400 mr-2" size={18} />}
             {currentView === 'dashboard' && (
                 <button 
@@ -539,7 +591,7 @@ const App: React.FC = () => {
       </div>
 
       {/* Bottom Nav */}
-      <div className="bg-white border-t border-gray-200 flex justify-around items-center h-16 pb-safe z-20 text-[10px]">
+      <div className="bg-white border-t border-gray-200 flex justify-around items-center h-16 pb-safe-bottom z-20 text-[10px]">
         <button onClick={() => setCurrentView('dashboard')} className={`flex flex-col items-center justify-center w-full h-full ${currentView === 'dashboard' || currentView === 'reports' ? 'text-ribeiro-red' : 'text-gray-400'}`}>
           <LayoutDashboard size={20} /><span className="font-medium mt-1">Home</span>
         </button>
@@ -697,3 +749,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+    
