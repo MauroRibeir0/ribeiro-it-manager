@@ -1,0 +1,23 @@
+{
+  "name": "Ribeiro, Lda. - Gestão Comercial",
+  "short_name": "Ribeiro IT",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#aa0000",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://via.placeholder.com/192/aa0000/ffffff?text=R",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://via.placeholder.com/512/aa0000/ffffff?text=R",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
